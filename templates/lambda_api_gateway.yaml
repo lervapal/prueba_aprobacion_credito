@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Desplegar push order por pilas
+
+Parameters:
+  NombreApi:
+    Type: String
+
+  # Dependencias:
+  #   Type: String
+
+  Stage:
+    Type: String
+    Default: dev
+
+  PathApiBase:
+    Type: String
+    Default: api
+
+  PathEnvioMensaje:
+    Type: String
+    Default: api
+  
+  RoleIAM:
+    Type: String
+
+  MetodoPOST:
+    Type: String
+    Default: POST
+
+  ApiKey:
+    Type: String
+
+  #sam deploy --template-file despliegue_stacks.yaml --config-file config_despliegue_stacks.toml --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+
+Resources:
+
+  # Solo para la API 
+  ApiLoggingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Seguimiento de logspara errores de la api #Allows the API to log errors to CloudWatch Logs
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        - 'arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess'
+  
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiLoggingRole.Arn   
+
+
+  # *********************************
+  # APIKEY
+  # *********************************
+  
+  ApiRest:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref NombreApi
+      ApiKeySourceType: HEADER
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # RecursoBaseApi:
+  #   Type: AWS::ApiGateway::Resource
+  #   Properties:
+  #     RestApiId: !Ref  ApiRest
+  #     PathPart: !Ref PathApiBase
+  #     ParentId: !GetAtt ApiRest.RootResourceId
+
+  ResourseEstado:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiRest # Required
+      PathPart: !Ref PathEnvioMensaje # Required
+      ParentId: !GetAtt ApiRest.RootResourceId # Required
+
+  # ResourseEstadoProxy:
+  #   Type: AWS::ApiGateway::Resource
+  #   Properties:
+  #     RestApiId: !Ref  ApiRest
+  #     PathPart: '{proxy+}'
+  #     ParentId: !Ref ResourseEstado  
+
+
+  ############################
+  #Metodos
+  ###########################
+
+  MethodEstado:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      ApiKeyRequired: false
+      HttpMethod: !Ref MetodoPOST
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaEnvioMensaje.Arn}/invocations"
+      ResourceId: !GetAtt ResourseEstado.ResourceId
+      RestApiId: !Ref ApiRest
+  
+  MethodCorsEstado:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiRest
+      ResourceId: !GetAtt ResourseEstado.ResourceId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+          #IntegrationHttpMethod: POST
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Methods: "'OPTIONS'"
+                method.response.header.Access-Control-Allow-Origin: "'*'"
+              ResponseTemplates:
+                "application/json": "{}"
+          RequestTemplates:
+            "application/json": "{ \"statusCode\" : 200 }"
+          Type: MOCK
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # MethodCorsEstadoProxy:
+  #   Type: AWS::ApiGateway::Method
+  #   Properties:
+  #     AuthorizationType: NONE
+  #     ApiKeyRequired: false
+  #     HttpMethod: !Ref MetodoPOST
+  #     Integration:
+  #       IntegrationHttpMethod: POST
+  #       Type: AWS_PROXY
+  #       Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaEnvioMensaje.Arn}/invocations"
+  #       TimeoutInMillis: 180000
+  #     ResourceId: !GetAtt ResourseEstadoProxy.ResourceId
+  #     RestApiId: !Ref ApiRest
+
+  ApiGatewayModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref ApiRest
+      Schema: {}
+
+  StageRest:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: !Ref Stage
+      Description: Stage despliegue
+      RestApiId: !Ref ApiRest
+      TracingEnabled: true      
+      Variables:
+        Stage: !Ref Stage
+      DeploymentId: !Ref DeploymentStageV0
+      MethodSettings:
+        - HttpMethod: '*'
+          LoggingLevel: ERROR
+          ResourcePath: '/*'
+          DataTraceEnabled: true
+
+  DeploymentStageV0:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - MethodEstado
+      - MethodCorsEstado
+    Properties: 
+      RestApiId: !Ref ApiRest
+
+  GatewayResponseApiKey:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseTemplates:
+        application/json: '{ "message": $context.error.messageString , "error": "api key invalida o expirada"}'
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+      ResponseType: INVALID_API_KEY 
+      RestApiId: !Ref ApiRest
+      StatusCode: '403'
+  
+  GatewayResponseBadRequest:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+      ResponseTemplates:
+        application/json: '{ "message": $context.error.messageString , "error": $context.error.validationErrorString }'
+      ResponseType: BAD_REQUEST_BODY 
+      RestApiId: !Ref ApiRest
+      StatusCode: '501'
+
+  # *********************************
+  # LAMBDAS
+  # *********************************  
+
+  LambdaEnvioMensaje:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Layers:
+      #   - !Ref Dependencias
+      CodeUri: ../transformation_aprobacion_credito/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      Timeout: 60
+      MemorySize: 500
+      Tracing: Active
+      Role: !Ref RoleIAM
+      # Environment:
+      #   Variables:
+      # Policies:
+      #   # - !Ref ManejadorPoliticas
+      #   - CloudWatchLambdaInsightsExecutionRolePolicy
+
+  LambdaFuntionEnvioMensajeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${LambdaEnvioMensaje}'
+      RetentionInDays: 5
+
+  #Permisos nvioMensaje
+  PermisoEnvioMensaje:
+    DependsOn:
+      - LambdaEnvioMensaje
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref LambdaEnvioMensaje
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiRest}/*/${MetodoPOST}/${PathEnvioMensaje}"
+
+  # PermisoEnvioMensajeDevProxy:
+  #   DependsOn:
+  #     - LambdaEnvioMensaje
+  #   Type: AWS::Lambda::Permission
+  #   Properties:
+  #     Action: "lambda:InvokeFunction"
+  #     FunctionName: !Ref LambdaEnvioMensaje
+  #     Principal: "apigateway.amazonaws.com"
+  #     SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiRest}/*/${MetodoPOST}/*"
+
+  ApiKeyEnvioMensaje: 
+    Type: AWS::ApiGateway::ApiKey
+    Properties: 
+      Name: !Sub "${AWS::StackName}-apikey-rest-${Stage}"
+      #Name: !Join ["", [{"Ref": "AWS::StackName"}, "-apikey-rest",]]
+      Description: !Join ["", [{"Ref": "AWS::StackName"}, "api key"]]
+      Enabled: true
+      GenerateDistinctId: false
+      Value: !Ref ApiKey
+      
+  ApiUsagePlan:
+    Type: "AWS::ApiGateway::UsagePlan"
+    DependsOn: 
+      - StageRest
+    Properties:
+      ApiStages: 
+        - ApiId: !Ref ApiRest
+          Stage: !Ref Stage
+      Description: !Join [" ", [{"Ref": "AWS::StackName"}, "usage plan rest"]]
+      # UsagePlanName: !Join ["", [{"Ref": "AWS::StackName"}, "-usage-plan-rest"]]
+      Quota:
+        Limit: 150000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 1000
+
+  ApiUsagePlanKey:
+    Type: "AWS::ApiGateway::UsagePlanKey"
+    Properties:
+      KeyId: !Ref ApiKeyEnvioMensaje
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+############
+# COMANDO DESPLAGAR ==>  sam deploy --template-file despliegue_stacks.yaml --config-file config_despliegue_stacks.toml --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+###########
+Outputs:
+  OutLogsDocumentos:
+    Value: !Ref LambdaFuntionEnvioMensajeLogGroup

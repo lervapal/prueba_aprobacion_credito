@@ -1,0 +1,32 @@
+# AMPLIFY
+
+## Configuración
+
+```
+amplify configure
+```
+Para configurar se debe tener una cuenta aws a la que se redirigirá para iniciar sesión.
+Una vez que haya iniciado sesión, Amplify CLI le pedirá que cree un usuario IAM. Si ya tiene un usuario creado, puede volver a la terminal, presionar enter y agregar sus credenciales.
+
+(El usuario debe ser AdministratorAccess o con acceso a lo siguiente: AWS Amplify - AppSync - Cognito - API Gateway)
+
+## Deploy
+
+Implementar backend
+```
+amplify push
+```
+
+
+Implementa  el frontend como el backend de nuestro proyecto. Pero para implementar el frontend, antes tenemos que crear un hosting que consiste en una estructura que albergará la aplicación web
+```
+amplify publish
+```
+
+Crear hosting de frontend
+```
+amplify add hosting
+```
+
+
+# SAM

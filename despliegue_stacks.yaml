@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Description: Desplegar push order por pilas
+
+Parameters:
+  NombreApi:
+    Type: String
+
+  # Dependencias:
+  #   Type: String
+
+  Stage:
+    Type: String
+    Default: dev
+
+  PathApiBase:
+    Type: String
+    Default: api
+  
+  RoleIAM:
+    Type: String
+    
+  ApiKey:
+    Type: String
+    Default: uFZcJFqtUmVghiHkYetQyuZQ5pTmjpFHvGe55uE7
+    
+  #sam deploy --template-file despliegue_stacks.yaml --config-file config_despliegue_stacks.toml --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+
+Resources:
+  #######################################
+  # INTERFACES
+  #######################################
+  Mensaje:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "./templates/lambda_api_gateway.yaml"
+      Parameters:
+        NombreApi: !Ref NombreApi
+        # StackName: !Sub "${AWS::StackName}"
+        # Method: "POST"
+        # Dependencias: !GetAtt DependenciesCon.Outputs.DependenciesArn
+        RoleIAM: !Ref RoleIAM
+        Stage: !Ref Stage
+        PathApiBase: !Ref PathApiBase
+        ApiKey: !Ref ApiKey
+
+
+
+############
+# COMANDO DESPLAGAR ==>  sam deploy --template-file despliegue_stacks.yaml --config-file config_despliegue_stacks.toml --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM
+########### 
